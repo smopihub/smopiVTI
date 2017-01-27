@@ -1,51 +1,68 @@
+#include <Time.h>
+
+
+#ifndef _VTI_H
+  #define _VTI_H
+
+
 //******************************************************//
-//Klasa VTItime - informacja o aktualnej dacie i godzinie
+//Struktura przechowująca informacje o dacie, godzinie
+// oraz milisekundach.
+//******************************************************//
+struct DateTimeMS
+{
+  volatile time_t        DT;
+  volatile unsigned long MS;
+};
+
+
+//******************************************************//
+//Klasa VTIclock - informacja o aktualnej dacie i godzinie
 //oraz milisekundy.
 //******************************************************//
-class VTItime
+class VTIclock
 {
   private:
-    volatile time_t        vtiDateTime;
-    volatile unsigned long vtiMS;
+    DateTimeMS vtiDateTimeMS;
 
   public:
-    // Default constructor - creates a VTItime object
+    // Default constructor - creates a VTIclock object
     // and initializes the member variables and state
-    VTItime()
+    VTIclock()
     {
-      vtiDateTime = 0;
-      vtiMS       = 0;
+      vtiDateTimeMS.DT = 0;
+      vtiDateTimeMS.MS = 0;
     }
 
 
-    // Constructor - creates a VTItime object
+    // Constructor - creates a VTIclock object
     // and initializes the member variables and state
-    VTItime(time_t DT, unsigned long ms)
+    VTIclock(time_t DT, unsigned long ms)
     {
-      vtiDateTime = DT;
-      vtiMS       = ms;
+      vtiDateTimeMS.DT = DT;
+      vtiDateTimeMS.MS = ms;
     }
 
     // Set date, time and millis
     void setDateTime(time_t DT, unsigned long ms)
     {
-      vtiDateTime = DT;
-      vtiMS       = ms;
+      vtiDateTimeMS.DT = DT;
+      vtiDateTimeMS.MS = ms;
     }
 
 
     // Update every 1 ms
     void Update()
     {
-      switch (vtiMS)
+      switch (vtiDateTimeMS.MS)
       {
         case 999:
-          vtiMS        = 0;
-          vtiDateTime += 1;
+          vtiDateTimeMS.MS  = 0;
+          vtiDateTimeMS.DT += 1;
          break;
 
         default:
-          vtiMS += 1;
+          vtiDateTimeMS.MS += 1;
          break;
       }
     }
@@ -54,22 +71,54 @@ class VTItime
     // get millis
     unsigned long getMillis()
     {
-      return vtiMS;
+      return vtiDateTimeMS.MS;
     }
 
 
     // get DateTime
     time_t getDateTime()
     {
-      return vtiDateTime;
+      return vtiDateTimeMS.DT;
     }
 
 
     // Zaokrąglij do pełnej sekundy
     void roundDateTime()
     {
-      if (vtiMS >= 500) vtiDateTime += 1;
-      vtiMS = 0;
+      if (vtiDateTimeMS.MS >= 500) vtiDateTimeMS.DT += 1;
+      vtiDateTimeMS.MS = 0;
+    }
+
+
+    // Zwróć strukture vtiDateTimeMS - w przypadku gdy rejestr TCNT1
+    // jest większy niż połowa OCR1A (powyżej 0,5ms) zaokrąglij
+    // w górę do pełnej ms. 
+    DateTimeMS  getDateTimeMS()
+    {
+      DateTimeMS tmpDateTimeMS;
+      
+      if( (TCNT1 << 1) > OCR1A )
+      {                                     //Ułamek milisekund > 0,5ms - trzeba zaokrąglać w górę
+          switch (vtiDateTimeMS.MS)
+          {
+            case 999:
+              tmpDateTimeMS.MS = 0;
+              tmpDateTimeMS.DT = vtiDateTimeMS.DT + 1;
+            break;
+
+            default:
+              tmpDateTimeMS.MS = vtiDateTimeMS.MS + 1;
+              tmpDateTimeMS.DT = vtiDateTimeMS.DT;
+            break; 
+          }
+          return tmpDateTimeMS;
+        } 
+       else                                 //Ułamek milisekund <= 0,5ms - nie trzeba zaokrąglać
+       {
+        return vtiDateTimeMS;
+       }
     }
 
 };
+
+#endif
