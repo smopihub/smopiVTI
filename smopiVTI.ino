@@ -23,8 +23,11 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
+//#define DEBUG
+
 #define HTTPSTRING   "--smopi.news.nstrefa.pl--"
-#define VERSTRING    "--  2015-17 VTI v2.1   --"
+#define VERSTRING    "- 2015-17 smopiVTI v2.1 -"
 #define MAX_CHECKS 5
 #define CPU_STEPS 16
 
@@ -35,19 +38,22 @@
 #include <MAX7456.h>
 
 // Zegar systemowy VTI
-VTIclock clock1;
+volatile VTIclock clock1;
 
 // Zmienne globalne
 volatile bool          checkedClock = false; // Czy częstotliwość zegara jest wyznaczona
-volatile unsigned int  checkNo      = 0;     // Numer sprawdzenia częstotliwości zegara
+volatile unsigned int  checkNo      = 1;     // Numer sprawdzenia częstotliwości zegara
 volatile bool          isPPSready   = false; // Czy pojawił się impuls 1PPS
 volatile unsigned long msTimeStamp  = 0;     // Ilość milisekund od uruchomienia urządzenia
+volatile unsigned int  counterPPS   = 0;     // Licznik PPS-ów
 volatile unsigned long microsPPS[MAX_CHECKS];// Mikrosekundy pomiędzy impulsami PPS
 unsigned long          averageClock = 0;     // Średnia częstotliwość zegara
 unsigned long          counterVSync = 0;     // Licznik ramek VSync
 
-//unsigned long          debugMicros1   = 0;
-//unsigned long          debugMicros2   = 0;
+#ifdef DEBUG
+  volatile unsigned int  vtiMillis      = 0;
+  volatile unsigned int  ppsTCNT1       = 0;
+#endif
 
 //Przełącznik trybu wyświetlania: Date/Time <-> Info
 const int displayModePin = 4;
@@ -78,8 +84,11 @@ ISR(TIMER1_COMPA_vect)
 //******************************************************//
 void setup()
 {
-  unsigned char system_video_in=NULL;
+  unsigned char system_video_in = NULL;
+  bool          gpsReady        = false;
+  
   TimeElements  tm;
+
 
   pinMode(PPSpin, INPUT);                // Impulsy PPS
   pinMode(displayModePin, INPUT_PULLUP); // Przełącznik Data/Czas <-> Info
@@ -205,28 +214,37 @@ void setup()
   //******************************************************//
   OSD.setCursor(0, 8);
   OSD.print("Czekam na dane GPS..");
- 
-  do {
-    static int i = 1;
+
+  
+  // TODO: ustalić czy odbiornik GPS jest w trybie 3D Fix - na tej podstawie ustalać gotowość VTI do pracy.
+  //       Co z "leap second"? Czy można jakoś stwierdzić, że odbiornik GPS pobrał już informację na ten temat?
+  while(!gpsReady)
+  {
+    static unsigned int  i  = 0;
     static unsigned long ms = millis();
 
+    //updateGPSobj(0);
+    if (Serial.available() > 0)
+    {
+      char a = Serial.read();
+      if(GPS.encode(a) && (GPS.satellites.value() > 5 && GPS.location.isValid() && GPS.time.isValid() && GPS.date.isValid() && GPS.time.age() < 200))
+      {
+        gpsReady = true;
+      }
+    }
+    
     if(millis() - ms > 1000)
     {
       i++;
       ms = millis();
-    }
-
-    // Wykonuj jeśli nie w VSYNC
-    while (OSD.notInVSync()) 
-    {}
-    
-    OSD.setCursor( 22, 8 );
-    OSD.print(i);
-    
-    updateGPSobj(0);  
-  } while( !(GPS.satellites.value() > 5 && GPS.location.isValid() && GPS.time.isValid() && GPS.date.isValid() && GPS.time.age() < 200) );
-  // TODO: ustalić czy odbiornik GPS jest w trybie 3D Fix - na tej podstawie ustalać gotowość VTI do pracy.
-  //       Co z "leap second"? Czy można jakoś stwierdzić, że odbiornik GPS pobrał już informację na ten temat?
+      
+      OSD.setCursor( 22, 8 );
+      OSD.print(i);
+    }    
+  }
+  
+  OSD.setCursor( 22, 8 );
+  OSD.print("OK ");
   
 
   //******************************************************//
@@ -240,9 +258,9 @@ void setup()
   tm.Month  = GPS.date.month();
   tm.Year   = GPS.date.year() - 1970;
 
-  clock1.setDateTime(makeTime(tm), 0);
-  
-  
+  clock1.setDateTime(makeTime(tm), 0);   // Ustaw czas VTI
+
+
   //******************************************************//
   // Konfiguracja licznika: timer1
   //******************************************************//
@@ -250,20 +268,23 @@ void setup()
   TCCR1A = 0;
   TCCR1B = 0;
   TCNT1  = 0;
-
-  OCR1A = (int) (averageClock / 1000); // compare match register 16MHz/1/1000Hz
+  
+  OCR1A  = (averageClock / 1000) - 1;  // compare match register 16MHz/1/1000Hz
   TCCR1B |= (1 << WGM12);              // CTC mode
   TCCR1B |= (1 << CS10);               // Prescaler: 1
   TIMSK1 |= (1 << OCIE1A);             // enable timer compare interrupt
   interrupts();                        // enable all interrupts
   // timer1 skonfigurowany
 
+  
   // Ustawienie funkcji przerwania dla impulsu 1PPS
   attachInterrupt(digitalPinToInterrupt(PPSpin), PPSevent, RISING);
 
+
   // Wykonuj do pierwszego wywołania funkcji PPSevent(), po jej wywołaniu
   // wewnętrzny czas VTI jest ustawiony z dokładnością +/- 1ms
-  while(msTimeStamp == 0);      
+  while(counterPPS < 2);
+
   
   // Wyczyść ekran
   OSD.clear();
@@ -472,17 +493,39 @@ void osdDate(boolean mustDisplay, struct DateTimeMS *ptr)
 // Wyświetl licznik półobrazów
 void osdVSync()
 {
-  char vsync[] = "      ";
-
-  vsync[5] = counterVSync          % 10 + '0';
-  vsync[4] = counterVSync / 10     % 10 + '0';
-  vsync[3] = counterVSync / 100    % 10 + '0';
-  vsync[2] = counterVSync / 1000   % 10 + '0';
-  vsync[1] = counterVSync / 10000  % 10 + '0';
-  vsync[0] = counterVSync / 100000 % 10 + '0';
+  char charVSync[]   = "      ";
+  
+  charVSync[5] = counterVSync          % 10 + '0';
+  charVSync[4] = counterVSync / 10     % 10 + '0';
+  charVSync[3] = counterVSync / 100    % 10 + '0';
+  charVSync[2] = counterVSync / 1000   % 10 + '0';
+  charVSync[1] = counterVSync / 10000  % 10 + '0';
+  charVSync[0] = counterVSync / 100000 % 10 + '0';
   
   OSD.setCursor( OSD.columns() - 6, 0 );
-  OSD.print( vsync );  
+  OSD.print( charVSync );  
+  
+  #ifdef DEBUG
+    char charMillis[] = "   ";
+    char charTCNT1[]  = "     ";
+    
+    charMillis[2] = vtiMillis       % 10 + '0';
+    charMillis[1] = vtiMillis / 10  % 10 + '0';
+    charMillis[0] = vtiMillis / 100 % 10 + '0';
+
+    charTCNT1[4] = ppsTCNT1         % 10 + '0';
+    charTCNT1[3] = ppsTCNT1 / 10    % 10 + '0';
+    charTCNT1[2] = ppsTCNT1 / 100   % 10 + '0';
+    charTCNT1[1] = ppsTCNT1 / 1000  % 10 + '0';
+    charTCNT1[0] = ppsTCNT1 / 10000 % 10 + '0';
+
+    
+    OSD.setCursor( OSD.columns() - 6, 1 );
+    OSD.print( charMillis );
+
+    OSD.setCursor( OSD.columns() - 6, 2 );
+    OSD.print( charTCNT1 );
+  #endif
 }
 
 
@@ -584,7 +627,7 @@ bool checkVTItime(unsigned long msParam)
   bool val  = true;
   time_t DT = clock1.getDateTime();
 
-  if (millis() - ms > msParam)
+  if (millis() - ms >= msParam)
   {
     ms = millis();
     // val = (GPS.time.hour() == hour(DT) && GPS.time.minute() == minute(DT) && GPS.time.second() == second(DT)) ? true : false;
@@ -605,11 +648,11 @@ void OSDFatalError()
 
   OSD.setCursor(0,4);
   OSD.print("VTI time: ");
-  OSD.print(hour(DT));OSD.print(minute(DT));OSD.print(second(DT));
+  OSD.print(hour(DT));OSD.print(":");OSD.print(minute(DT));OSD.print(":");OSD.print(second(DT));OSD.print("   ");
 
   OSD.setCursor(0,5);
   OSD.print("GPS time: ");
-  OSD.print(GPS.time.hour());OSD.print(GPS.time.minute());OSD.print(GPS.time.second());
+  OSD.print(GPS.time.hour());OSD.print(":");OSD.print(GPS.time.minute());OSD.print(":");OSD.print(GPS.time.second());OSD.print("   ");
   
   //while(1) {};
 }
@@ -618,11 +661,16 @@ void OSDFatalError()
 //Wykonaj gdy impuls PPS
 void PPSevent()
 {
-  msTimeStamp = millis();
-
-  clock1.roundDateTime(); //Zaokrąglij aktualną godzinę do pełej sekundy
+  #ifdef DEBUG
+    vtiMillis = clock1.getMillis();
+    ppsTCNT1  = TCNT1;
+  #endif
   
-  TCNT1  = 0;            //Wyzeruj rejest w timer1 ATmega328
+  msTimeStamp = millis();
+  counterPPS++;
+
+  clock1.roundDateTime();
+  TCNT1  = 0;            // (0 <-> OCR1A) Wyzeruj rejest w timer1 ATmega328
 }
 
 
@@ -638,14 +686,14 @@ void checkClock()
 
   if(abs(tmpMS) < 5)
   {
-    microsPPS[checkNo] = micros() - microsTS;
+    microsPPS[checkNo - 1] = micros() - microsTS;
     checkNo += 1;
   }
 
   microsTS = micros();
   millisTS = millis();
 
-  checkedClock = (checkNo == MAX_CHECKS) ? true : false;
+  checkedClock = (checkNo - 1 == MAX_CHECKS) ? true : false;
 }
 
 

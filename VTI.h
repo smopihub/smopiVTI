@@ -11,8 +11,8 @@
 //******************************************************//
 struct DateTimeMS
 {
-  volatile time_t        DT;
-  volatile unsigned long MS;
+  time_t        DT;
+  unsigned long MS;
 };
 
 
@@ -90,33 +90,10 @@ class VTIclock
     }
 
 
-    // Zwróć strukture vtiDateTimeMS - w przypadku gdy rejestr TCNT1
-    // jest większy niż połowa OCR1A (powyżej 0,5ms) zaokrąglij
-    // w górę do pełnej ms. 
+    // Zwróć strukture vtiDateTimeMS
     DateTimeMS  getDateTimeMS()
     {
-      DateTimeMS tmpDateTimeMS;
-      
-      if( (TCNT1 << 1) > OCR1A )
-      {                                     //Ułamek milisekund > 0,5ms - trzeba zaokrąglać w górę
-          switch (vtiDateTimeMS.MS)
-          {
-            case 999:
-              tmpDateTimeMS.MS = 0;
-              tmpDateTimeMS.DT = vtiDateTimeMS.DT + 1;
-            break;
-
-            default:
-              tmpDateTimeMS.MS = vtiDateTimeMS.MS + 1;
-              tmpDateTimeMS.DT = vtiDateTimeMS.DT;
-            break; 
-          }
-          return tmpDateTimeMS;
-        } 
-       else                                 //Ułamek milisekund <= 0,5ms - nie trzeba zaokrąglać
-       {
-        return vtiDateTimeMS;
-       }
+      return vtiDateTimeMS;
     }
 
 };
