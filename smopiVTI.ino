@@ -1,5 +1,5 @@
 /* 
- *  Video Time Inserter: http://smopi.news.nstrefa.pl/ wersja v2.1.
+ *  Video Time Inserter: http://smopi.news.nstrefa.pl/ wersja v2.2.
  *  Wymagania sprzętowe:
  *  - Arduino UNO,
  *  - odbiornik GPS U-Blox NEO-6M lub zgodny,
@@ -27,7 +27,7 @@
 //#define DEBUG
 
 #define HTTPSTRING   "--smopi.news.nstrefa.pl--"
-#define VERSTRING    "- 2015-17 smopiVTI v2.1 -"
+#define VERSTRING    "- 2015-17 smopiVTI v2.2 -"
 #define MAX_CHECKS 5
 #define CPU_STEPS 16
 
@@ -38,7 +38,7 @@
 #include <MAX7456.h>
 
 // Zegar systemowy VTI
-volatile VTIclock clock1;
+VTIclock clock1;
 
 // Zmienne globalne
 volatile bool          checkedClock = false; // Czy częstotliwość zegara jest wyznaczona
@@ -215,6 +215,9 @@ void setup()
   OSD.setCursor(0, 8);
   OSD.print("Czekam na dane GPS..");
 
+  OSD.setCursor(0, 9);
+  OSD.print("NMEA z Fix-em.......");
+
   
   // TODO: ustalić czy odbiornik GPS jest w trybie 3D Fix - na tej podstawie ustalać gotowość VTI do pracy.
   //       Co z "leap second"? Czy można jakoś stwierdzić, że odbiornik GPS pobrał już informację na ten temat?
@@ -227,10 +230,7 @@ void setup()
     if (Serial.available() > 0)
     {
       char a = Serial.read();
-      if(GPS.encode(a) && (GPS.satellites.value() > 5 && GPS.location.isValid() && GPS.time.isValid() && GPS.date.isValid() && GPS.time.age() < 200))
-      {
-        gpsReady = true;
-      }
+      gpsReady = GPS.encode(a) && (GPS.sentencesWithFix() > 5 && GPS.location.isValid() && GPS.time.isValid() && GPS.date.isValid());
     }
     
     if(millis() - ms > 1000)
@@ -240,6 +240,10 @@ void setup()
       
       OSD.setCursor( 22, 8 );
       OSD.print(i);
+
+      OSD.setCursor( 22, 9 );
+      OSD.print(GPS.sentencesWithFix());
+
     }    
   }
   
@@ -547,11 +551,11 @@ void osdInfo()
     OSD.print(GPS.location.lng(), 5);
     (GPS.location.rawLng().negative) ? OSD.print(" W") : OSD.print(" E");
   
-    OSD.setCursor( 0, 3 );
+    OSD.setCursor( 0, 2 );
     (GPS.altitude.isValid()) ? OSD.print(GPS.altitude.meters(), 0) : OSD.print("---");
     OSD.print(" m  ");
   
-    OSD.setCursor( 0, 5 );
+    OSD.setCursor( 0, 4 );
     OSD.print("satellites: ");
     OSD.print(GPS.satellites.value());
 
@@ -562,13 +566,17 @@ void osdInfo()
     OSD.print((tmpHDOP / 10) % 10);
     OSD.print("  ");
 
-    OSD.setCursor( 0, 7 );
-    OSD.print("NMEA failed: ");
+    OSD.setCursor( 0, 6 );
+    OSD.print("NMEA failed..: ");
     OSD.print(GPS.failedChecksum());
 
-    OSD.setCursor( 0, 8 );
-    OSD.print("NMEA passed: ");
+    OSD.setCursor( 0, 7 );
+    OSD.print("NMEA passed..: ");
     OSD.print(GPS.passedChecksum());
+
+    OSD.setCursor( 0, 8 );
+    OSD.print("NMEA with fix: ");
+    OSD.print(GPS.sentencesWithFix());
   }
   OSDfooter();
   OSD.home();
