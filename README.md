@@ -1,7 +1,7 @@
 smopiVTI - cheap and easy to build Arduino Video Time Inserter
 --------------------------------------------------------------
 
-URL: http://smopi.news.nstrefa.pl/index.php?pages/Video-Time-Inserter
+WIKI: https://github.com/smopihub/smopiVTI/wiki/Start-Page
 
 Wymagania sprzętowe:
 - Arduino UNO,
